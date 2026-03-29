@@ -1,0 +1,4 @@
+../Core/Src/sensor.c:19:12:i2c_write	32	static
+../Core/Src/sensor.c:29:12:read_calibration	72	static
+../Core/Src/sensor.c:54:5:sensor_init	32	static
+../Core/Src/sensor.c:82:5:sensor_read	56	static
