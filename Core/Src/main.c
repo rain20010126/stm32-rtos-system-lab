@@ -7,6 +7,7 @@
 #include "i2c.h"
 #include "benchmark_cpu.h"
 #include "benchmark_sys.h"
+#include "control.h"
 
 UART_HandleTypeDef huart2;
 
@@ -211,6 +212,9 @@ void StartTask02(void *argument)
 
   sensor_init();
 
+  // --- PI controller state ---
+  static int integral = 0;
+
   for(;;)
   {   
       if (sensor_read(&data.sensor) == 0)
@@ -224,14 +228,36 @@ void StartTask02(void *argument)
           {
               uint32_t depth = osMessageQueueGetCount(logQueueHandle);
               benchmark_queue_update(depth);
+
+              // --- PI control ---
+              int error = (int)depth - TARGET_DEPTH;
+
+              // integral accumulation
+              integral += error;
+
+              // anti-windup (very important!)
+              if (integral > 100) integral = 100;
+              if (integral < -100) integral = -100;
+
+              int delay = BASE_DELAY + KP * error + KI * integral;
+
+              // clamp delay
+              if (delay < MIN_DELAY) delay = MIN_DELAY;
+              if (delay > MAX_DELAY) delay = MAX_DELAY;
+
+
+              osDelay(delay);
           }
           else
           {
               benchmark_queue_drop();
+
+              // queue full -> reduce the producer rate
+              osDelay(MAX_DELAY);
           }
       }
-
-      osDelay(100);   // 10 Hz
+    
+      // osDelay(10);
   }
 }
 
@@ -261,7 +287,7 @@ void StartTask03(void *argument)
         uint32_t queue_cycles = benchmark_end(data.timestamp);
 
         // simulate processing
-        for (volatile int i = 0; i < 300000; i++);
+        for (volatile int i = 0; i < 200000; i++);
 
         // T2：after processing 
         uint32_t total_cycles = benchmark_end(data.timestamp);
