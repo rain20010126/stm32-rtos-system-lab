@@ -257,11 +257,22 @@ void StartTask03(void *argument)
     {
         benchmark_throughput_inc();
 
-        // slow down consumer (create bottleneck)
+        // T1：dequeue
+        uint32_t queue_cycles = benchmark_end(data.timestamp);
+
+        // simulate processing
         for (volatile int i = 0; i < 300000; i++);
-        
-        uint32_t cycles = benchmark_end(data.timestamp);
-        benchmark_latency_record(cycles);
+
+        // T2：after processing 
+        uint32_t total_cycles = benchmark_end(data.timestamp);
+        uint32_t processing_cycles = total_cycles - queue_cycles;        
+        benchmark_latency_record(total_cycles);
+
+        printf("queue=%lu us, proc=%lu us, total=%lu us\r\n",
+                queue_cycles / (CPU_FREQ / 1000000),
+                processing_cycles / (CPU_FREQ / 1000000),
+                total_cycles / (CPU_FREQ / 1000000));
+
         // if (++counter >= 10)
         // {
         //     counter = 0;
