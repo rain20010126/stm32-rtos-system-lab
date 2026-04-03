@@ -220,7 +220,7 @@ void StartTask02(void *argument)
       if (sensor_read(&data.sensor) == 0)
       {   
           // simulate workload
-          for (volatile int i = 0; i < 50000; i++);
+          // for (volatile int i = 0; i < 50000; i++);
 
           data.timestamp = benchmark_start();
 
@@ -235,7 +235,7 @@ void StartTask02(void *argument)
               // integral accumulation
               integral += error;
 
-              // anti-windup (very important!)
+              // anti-windup
               if (integral > 100) integral = 100;
               if (integral < -100) integral = -100;
 
@@ -257,7 +257,7 @@ void StartTask02(void *argument)
           }
       }
     
-      // osDelay(10);
+      osDelay(10);
   }
 }
 
@@ -272,55 +272,60 @@ void StartTask03(void *argument)
 {
   log_data_t data;
 
-  uint32_t last_tick = osKernelGetTickCount(); 
+  // uint32_t last_tick = osKernelGetTickCount(); 
 
-  // static int counter = 0;
+  static int counter = 0;
 
   for(;;)
   {
-    // polling (non-blocking)
     if (osMessageQueueGet(logQueueHandle, &data, NULL, 0) == osOK)
     {
-        benchmark_throughput_inc();
+      // ================================
+      // [Benchmark Section]
+      // ================================
 
-        // T1：dequeue
-        uint32_t queue_cycles = benchmark_end(data.timestamp);
+      // // Count throughput (messages processed)
+      // benchmark_throughput_inc();
 
-        // simulate processing
-        for (volatile int i = 0; i < 200000; i++);
+      // // T1: measure time from enqueue → dequeue
+      // uint32_t queue_cycles = benchmark_end(data.timestamp);
 
-        // T2：after processing 
-        uint32_t total_cycles = benchmark_end(data.timestamp);
-        uint32_t processing_cycles = total_cycles - queue_cycles;        
-        benchmark_latency_record(total_cycles);
+      // // Simulate processing workload (CPU-bound task)
+      // for (volatile int i = 0; i < 200000; i++);
 
-        printf("queue=%lu us, proc=%lu us, total=%lu us\r\n",
-                queue_cycles / (CPU_FREQ / 1000000),
-                processing_cycles / (CPU_FREQ / 1000000),
-                total_cycles / (CPU_FREQ / 1000000));
+      // // T2: measure total latency (enqueue → processing done)
+      // uint32_t total_cycles = benchmark_end(data.timestamp);
 
-        // if (++counter >= 10)
-        // {
-        //     counter = 0;
+      // // Pure processing time = total - queue waiting time
+      // uint32_t processing_cycles = total_cycles - queue_cycles;
 
-        //     int temp = data.sensor.temperature;
+      // // Record max latency
+      // benchmark_latency_record(total_cycles);
 
-        //     printf("T: %d.%02d\r\n",
-        //             temp / 100,
-        //             abs(temp % 100));
-        // }
+      // // Print benchmark result (convert cycles → microseconds)
+      // printf("queue=%lu us, proc=%lu us, total=%lu us\r\n",
+      //         queue_cycles / (CPU_FREQ / 1000000),
+      //         processing_cycles / (CPU_FREQ / 1000000),
+      //         total_cycles / (CPU_FREQ / 1000000));
+
+
+      // ================================
+      // [Temperature Print Section]
+      // ================================
+
+      // Reduce print frequency (print every 10 samples)
+      if (++counter >= 10)
+      {
+          counter = 0;
+
+          int temp = data.sensor.temperature;
+
+          // Print temperature in fixed-point format (xx.xx °C)
+          printf("T: %d.%02d\r\n",
+                  temp / 100,
+                  abs(temp % 100));
+      }
     }
-
-    if (osKernelGetTickCount() - last_tick >= 1000)
-    {
-        last_tick = osKernelGetTickCount();
-
-        benchmark_cpu_log();
-        benchmark_sys_log();
-    }
-
-    // prevent busy loop
-    osDelay(1);
   }
 }
 
