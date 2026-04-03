@@ -9,7 +9,7 @@
 #include "benchmark_sys.h"
 #include "control.h"
 
-#define BENCHMARK_MODE 0   // 1: benchmark, 0: production
+#define BENCHMARK_MODE 1   // 1: benchmark, 0: production
 
 UART_HandleTypeDef huart2;
 
@@ -18,7 +18,7 @@ osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
   .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .priority = (osPriority_t) osPriorityLow,
 };
 
 /* Definitions for SensorTask */
@@ -37,6 +37,14 @@ const osThreadAttr_t LoggerTask_attributes = {
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 
+/* Definitions for BenchmarkTask */
+osThreadId_t BenchmarkTaskHandle;
+const osThreadAttr_t BenchmarkTask_attributes = {
+  .name = "BenchmarkTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+
 /* Definitions for logQueue */
 osMessageQueueId_t logQueueHandle;
 const osMessageQueueAttr_t logQueue_attributes = {
@@ -53,6 +61,7 @@ static void MX_USART2_UART_Init(void);
 void StartDefaultTask(void *argument);
 void StartTask02(void *argument);
 void StartTask03(void *argument);
+void BenchmarkTask(void *argument);
 
 int main(void)
 {
@@ -73,6 +82,7 @@ int main(void)
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
   SensorTaskHandle = osThreadNew(StartTask02, NULL, &SensorTask_attributes);
   LoggerTaskHandle = osThreadNew(StartTask03, NULL, &LoggerTask_attributes);
+  BenchmarkTaskHandle = osThreadNew(BenchmarkTask, NULL, &BenchmarkTask_attributes);
 
   /* Start scheduler */
   osKernelStart();
@@ -192,13 +202,16 @@ void StartDefaultTask(void *argument)
   osDelay(2000);
 
   vTaskSuspend(SensorTaskHandle);
-  benchmark_calibrate_idle(); 
-  vTaskResume(SensorTaskHandle);
+  vTaskSuspend(LoggerTaskHandle);
+  vTaskSuspend(BenchmarkTaskHandle); 
 
-  for(;;)
-  {
-    osDelay(1);
-  }
+  benchmark_calibrate_idle(); 
+  
+  vTaskResume(SensorTaskHandle);
+  vTaskResume(LoggerTaskHandle);
+  vTaskResume(BenchmarkTaskHandle);
+
+  vTaskDelete(NULL);
 }
 
 void StartTask02(void *argument)
@@ -208,7 +221,7 @@ void StartTask02(void *argument)
   sensor_init();
 
   // --- PI controller state ---
-  static int integral = 0;
+  // static int integral = 0;
 
   for(;;)
   {   
@@ -224,24 +237,25 @@ void StartTask02(void *argument)
               uint32_t depth = osMessageQueueGetCount(logQueueHandle);
               benchmark_queue_update(depth);
 
-              // --- PI control ---
-              int error = (int)depth - TARGET_DEPTH;
+              // // --- PI control ---
+              // int error = (int)depth - TARGET_DEPTH;
 
-              // integral accumulation
-              integral += error;
+              // // integral accumulation
+              // integral += error;
 
-              // anti-windup
-              if (integral > 100) integral = 100;
-              if (integral < -100) integral = -100;
+              // // anti-windup
+              // if (integral > 100) integral = 100;
+              // if (integral < -100) integral = -100;
 
-              int delay = BASE_DELAY + KP * error + KI * integral;
+              // int delay = BASE_DELAY + KP * error + KI * integral;
 
-              // clamp delay
-              if (delay < MIN_DELAY) delay = MIN_DELAY;
-              if (delay > MAX_DELAY) delay = MAX_DELAY;
+              // // clamp delay
+              // if (delay < MIN_DELAY) delay = MIN_DELAY;
+              // if (delay > MAX_DELAY) delay = MAX_DELAY;
 
 
-              osDelay(delay);
+              // osDelay(delay);
+              osDelay(50);
           }
           else
           {
@@ -258,7 +272,7 @@ void StartTask02(void *argument)
 
 void StartTask03(void *argument)
 {
-  log_data_t data = {0};   // 防止未初始化
+  log_data_t data = {0}; 
   static int counter = 0;
 
   for(;;)
@@ -267,9 +281,9 @@ void StartTask03(void *argument)
     // ================================
     // [Benchmark Mode - Non-blocking]
     // ================================
-    if (osMessageQueueGet(logQueueHandle, &data, NULL, 0) != osOK)
+    if (osMessageQueueGet(logQueueHandle, &data, NULL, osWaitForever) != osOK)
     {
-        continue;  // no data → busy loop
+        continue; 
     }
 #else
     // ================================
@@ -290,22 +304,23 @@ void StartTask03(void *argument)
     benchmark_throughput_inc();
 
     // T1: queue latency
-    uint32_t queue_cycles = benchmark_end(data.timestamp);
+    // uint32_t queue_cycles = benchmark_end(data.timestamp);
 
-    // Simulate processing workload
-    for (volatile int i = 0; i < 200000; i++);
+    // // Simulate processing workload
+    // for (volatile int i = 0; i < 200000; i++);
 
     // T2: total latency
     uint32_t total_cycles = benchmark_end(data.timestamp);
 
-    uint32_t processing_cycles = total_cycles - queue_cycles;
+    // uint32_t processing_cycles = total_cycles - queue_cycles;
 
     benchmark_latency_record(total_cycles);
 
-    printf("[BENCH] queue=%lu us, proc=%lu us, total=%lu us\r\n",
-            queue_cycles / (CPU_FREQ / 1000000),
-            processing_cycles / (CPU_FREQ / 1000000),
-            total_cycles / (CPU_FREQ / 1000000));
+    // printf("[BENCH] queue=%lu us, proc=%lu us, total=%lu us\r\n",
+    //         queue_cycles / (CPU_FREQ / 1000000),
+    //         processing_cycles / (CPU_FREQ / 1000000),
+    //         total_cycles / (CPU_FREQ / 1000000));
+    
 #endif
 
     // ================================
@@ -318,11 +333,22 @@ void StartTask03(void *argument)
 
         int temp = data.sensor.temperature;
 
-        printf("T: %d.%02d\r\n",
-                temp / 100,
-                abs(temp % 100));
+        // printf("T: %d.%02d\r\n",
+                // temp / 100,
+                // abs(temp % 100));
     }
   }
+}
+
+void BenchmarkTask(void *argument)
+{
+    for (;;)
+    {
+        benchmark_sys_log();
+        benchmark_cpu_log();
+
+        osDelay(1000);   // 每秒印一次
+    }
 }
 
 /**
