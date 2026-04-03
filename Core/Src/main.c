@@ -9,7 +9,7 @@
 #include "benchmark_sys.h"
 #include "control.h"
 
-#define BENCHMARK_MODE 1   // 1: benchmark, 0: production
+#define BENCHMARK_MODE 0   // 1: benchmark, 0: production
 
 UART_HandleTypeDef huart2;
 
