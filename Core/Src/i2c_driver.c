@@ -15,12 +15,15 @@
 #include "stm32f4xx.h"
 #include <stdio.h>
 #include "cmsis_os2.h"
+#include "FreeRTOS.h"
+#include "semphr.h"
 
-static osSemaphoreId_t i2cSem;
+static SemaphoreHandle_t i2cSem;
 
 void i2c_os_init(void)
-{
-    i2cSem = osSemaphoreNew(1, 0, NULL);
+{   
+    i2cSem = xSemaphoreCreateBinary();
+    // printf("sem addr = %p\n", i2cSem);
 }
 
 
@@ -72,8 +75,16 @@ static i2c_callback_t i2c_cb = 0;
 
 static void i2c_done_cb(void)
 {
-    printf("I2C DONE\n");   // for debug
-    osSemaphoreRelease(i2cSem);
+    // printf("Before release\n");   // for debug
+    // printf("in IRQ = %lu\n", __get_IPSR());
+    
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    xSemaphoreGiveFromISR(i2cSem, &xHigherPriorityTaskWoken);
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+    // printf("After release\n");
 }
 
 // ======================================================
@@ -92,6 +103,9 @@ void enable_interrupt(void)
     I2C1->CR2 |= (I2C_CR2_ITEVTEN |
                   I2C_CR2_ITBUFEN |
                   I2C_CR2_ITERREN);
+    
+    NVIC_SetPriority(I2C1_EV_IRQn, 6);
+    NVIC_SetPriority(I2C1_ER_IRQn, 6);
 
     NVIC_EnableIRQ(I2C1_EV_IRQn);
     NVIC_EnableIRQ(I2C1_ER_IRQn);
@@ -105,13 +119,21 @@ int i2c_read_reg(uint8_t dev, uint8_t reg, uint8_t *buf, int len)
 {
     i2c.is_read = 1;
 
-    if (i2c_read_reg_async(dev, reg, buf, len, 0) != 0)
+    // enable interrupt
+    // I2C1->CR2 |= (I2C_CR2_ITEVTEN |
+    //               I2C_CR2_ITBUFEN |
+    //               I2C_CR2_ITERREN);
+
+    while (uxSemaphoreGetCount(i2cSem) > 0)
+    {
+        xSemaphoreTake(i2cSem, 0);
+    }
+
+    // start async transaction
+    if (i2c_read_reg_async(dev, reg, buf, len, i2c_done_cb) != 0)
         return -1;
 
-    while (i2c_is_busy())
-    {
-        osDelay(1);
-    }
+    xSemaphoreTake(i2cSem, portMAX_DELAY);
 
     return 0;
 }
@@ -120,13 +142,20 @@ int i2c_write_reg(uint8_t dev, uint8_t reg, uint8_t val)
 {
     i2c.is_read = 0;
 
-    if (i2c_write_reg_async(dev, reg, val, 0) != 0)
+    // I2C1->CR2 |= (I2C_CR2_ITEVTEN |
+    //               I2C_CR2_ITBUFEN |
+    //               I2C_CR2_ITERREN);
+
+    // clear old token
+    while (uxSemaphoreGetCount(i2cSem) > 0)
+        xSemaphoreTake(i2cSem, 0);
+
+    if (i2c_write_reg_async(dev, reg, val, i2c_done_cb) != 0)
         return -1;
 
-    while (i2c_is_busy())
-    {
-        osDelay(1);
-    }
+    // wait
+    xSemaphoreTake(i2cSem, portMAX_DELAY);
+
 
     return 0;
 }
@@ -392,14 +421,22 @@ void i2c_ev_irq_handler(void)
         {
             I2C1->CR1 |= I2C_CR1_STOP;
 
-            i2c.state = I2C_DONE;
+            // I2C1->CR2 &= ~(I2C_CR2_ITEVTEN |
+            //             I2C_CR2_ITBUFEN |
+            //             I2C_CR2_ITERREN);
+
+            i2c.state = I2C_IDLE;
             i2c.busy  = 0;
 
             I2C1->CR1 |= I2C_CR1_ACK;   // Restore ACK
 
             if (i2c_cb)
+            {
                 i2c_cb();              // Notify completion
-        }
+                i2c_cb = 0;
+            }
+                
+            }
         break;
 
     default:

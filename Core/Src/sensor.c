@@ -126,14 +126,15 @@ int sensor_read_temperature(sensor_data_t *data)
     uint8_t buf[3];
 
     // config register (recommended)
-    if (i2c_write(0x75, 0x00) != HAL_OK)
+    // printf("1\n");
+    if (i2c_write(0x75, 0x00) != 0)
         return -1;
-
+    // printf("2\n");
     // ctrl_meas:
     // osrs_t = x1 (001)
     // mode = forced (01)
     // => 001 00 01 = 0x25
-    if (i2c_write(0x74, 0x25) != HAL_OK)
+    if (i2c_write(0x74, 0x25) != 0)
         return -1;
 
     // read temperature registers

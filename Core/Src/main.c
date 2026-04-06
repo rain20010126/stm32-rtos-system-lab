@@ -339,9 +339,9 @@ void StartTask03(void *argument)
 
         int temp = data.sensor.temperature;
 
-        printf("T: %d.%02d\r\n",
-                temp / 100,
-                abs(temp % 100));
+        // printf("T: %d.%02d\r\n",
+        //         temp / 100,
+        //         abs(temp % 100));
     }
   }
 }
@@ -350,10 +350,10 @@ void BenchmarkTask(void *argument)
 {
     for (;;)
     {
-        // benchmark_sys_log();
-        // benchmark_cpu_log();
+        benchmark_sys_log();
+        benchmark_cpu_log();
 
-        osDelay(1000);   // 每秒印一次
+        osDelay(1000); 
     }
 }
 
