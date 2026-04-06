@@ -1,0 +1,12 @@
+# Build output
+Debug/
+build/
+
+# Object / analysis files
+*.o
+*.su
+*.cyclo
+
+# Binary
+*.elf
+*.map
