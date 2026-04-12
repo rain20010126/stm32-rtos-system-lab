@@ -5,6 +5,6 @@
 ../Core/Src/main.c:189:5:_write	1
 ../Core/Src/main.c:203:6:StartDefaultTask	1
 ../Core/Src/main.c:220:6:StartTask02	3
-../Core/Src/main.c:277:6:StartTask03	3
-../Core/Src/main.c:347:6:BenchmarkTask	1
-../Core/Src/main.c:362:6:Error_Handler	1
+../Core/Src/main.c:278:6:StartTask03	3
+../Core/Src/main.c:348:6:BenchmarkTask	1
+../Core/Src/main.c:363:6:Error_Handler	1

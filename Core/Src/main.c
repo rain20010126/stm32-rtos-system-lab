@@ -248,8 +248,8 @@ void StartTask02(void *argument)
               // integral += error;
 
               // // anti-windup
-              // if (integral > 100) integral = 100;
-              // if (integral < -100) integral = -100;
+              // if (integral > 20) integral = 20;
+              // if (integral < -20) integral = -20;
 
               // int delay = BASE_DELAY + KP * error + KI * integral;
 
@@ -259,7 +259,8 @@ void StartTask02(void *argument)
 
 
               // osDelay(delay);
-              osDelay(1);
+              // printf("delay = %d ms\r\n", delay);
+              osDelay(0);
           }
           else
           {
@@ -337,9 +338,9 @@ void StartTask03(void *argument)
 
         int temp = data.sensor.temperature;
 
-        printf("T: %d.%02d\r\n",
-                temp / 100,
-                abs(temp % 100));
+        // printf("T: %d.%02d\r\n",
+        //         temp / 100,
+        //         abs(temp % 100));
     }
   }
 }
@@ -348,8 +349,8 @@ void BenchmarkTask(void *argument)
 {
     for (;;)
     {
-        // benchmark_sys_log();
-        // benchmark_cpu_log();
+        benchmark_sys_log();
+        benchmark_cpu_log();
 
         osDelay(1000);   // 每秒印一次
     }
