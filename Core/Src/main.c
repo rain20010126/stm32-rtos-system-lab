@@ -382,7 +382,7 @@ void StartTask03(void *argument)
 
     else if (current_mode == MODE_TEMP)
     {
-        if (++counter >= 100)
+        if (++counter >= 500)
         {
             counter = 0;
 
@@ -448,10 +448,10 @@ void RxTask(void *argument)
                     i2c_request_t req;
                     osSemaphoreId_t sem = osSemaphoreNew(1, 0, NULL);
 
-                    sensor_data_t data; 
+                    log_data_t data;
 
                     req.type = I2C_REQ_READ_PRESSURE;
-                    req.result = &data;
+                    req.result = &data.sensor;
                     req.done_sem = sem;
 
                     // send request
@@ -466,7 +466,7 @@ void RxTask(void *argument)
                         osSemaphoreAcquire(sem, osWaitForever);
 
                         // print result
-                        printf("P = %ld Pa\r\n", data.pressure);
+                        printf("P = %ld Pa\r\n", data.sensor.pressure);
 
                         osSemaphoreDelete(sem);
                     }
@@ -512,13 +512,17 @@ void I2CTask(void *argument)
             {
                 sensor_read_temperature(req.result);
             }
+            else if (req.type == I2C_REQ_READ_PRESSURE)
+            {
+                // printf("Reading pressure...\r\n");
+                sensor_read_pressure(req.result);
+            }
 
-            osSemaphoreRelease(req.done_sem);
-        }
-
-        else if (req.type == I2C_REQ_READ_PRESSURE)
-        {
-            sensor_read_pressure(req.result);
+            // release AFTER handling request
+            if (req.done_sem != NULL)
+            {
+                osSemaphoreRelease(req.done_sem);
+            }
         }
     }
 }

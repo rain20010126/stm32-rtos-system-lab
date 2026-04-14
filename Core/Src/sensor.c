@@ -165,33 +165,33 @@ int sensor_read_temperature(sensor_data_t *data)
 
 int32_t BME680_compensate_P(uint32_t adc_P)
 {
-  int32_t var1 = 0, var2 = 0, var3 = 0, var4 = 0, P = 0;
-  var1 = (((int32_t) t_fine) >> 1) - 64000;
-  var2 = ((((var1 >> 2) * (var1 >> 2)) >> 11) * (int32_t) dig_P6) >> 2;
-  var2 = var2 + ((var1 * (int32_t)dig_P5) << 1);
-  var2 = (var2 >> 2) + ((int32_t) dig_P4 << 16);
-  var1 = (((((var1 >> 2) * (var1 >> 2)) >> 13) * ((int32_t) dig_P3 << 5)) >> 3) + (((int32_t) dig_P2 * var1) >> 1);
-  var1 = var1 >> 18;
-  var1 = ((32768 + var1) * (int32_t) dig_P1) >> 15;
-  P = 1048576 - adc_P;
-  P = (int32_t)((P - (var2 >> 12)) * ((uint32_t) 3125));
-  var4 = (1 << 31);
-  
-  if(P >= var4)
-    P = (( P / (uint32_t) var1) << 1);
-  else
-    P = ((P << 1) / (uint32_t) var1);
+    int32_t var1 = 0, var2 = 0, var3 = 0, var4 = 0, P = 0;
+    var1 = (((int32_t) t_fine) >> 1) - 64000;
+    var2 = ((((var1 >> 2) * (var1 >> 2)) >> 11) * (int32_t) dig_P6) >> 2;
+    var2 = var2 + ((var1 * (int32_t)dig_P5) << 1);
+    var2 = (var2 >> 2) + ((int32_t) dig_P4 << 16);
+    var1 = (((((var1 >> 2) * (var1 >> 2)) >> 13) * ((int32_t) dig_P3 << 5)) >> 3) + (((int32_t) dig_P2 * var1) >> 1);
+    var1 = var1 >> 18;
+    var1 = ((32768 + var1) * (int32_t) dig_P1) >> 15;
+    P = 1048576 - adc_P;
+    P = (int32_t)((P - (var2 >> 12)) * ((uint32_t) 3125));
+    var4 = (1 << 31);
     
-  var1 = ((int32_t) dig_P9 * (int32_t) (((P >> 3) * (P >> 3)) >> 13)) >> 12;
-  var2 = ((int32_t)(P >> 2) * (int32_t) dig_P8) >> 13;
-  var3 = ((int32_t)(P >> 8) * (int32_t)(P >> 8) * (int32_t)(P >> 8) * (int32_t)dig_P10) >> 17;
-  P = (int32_t)(P) + ((var1 + var2 + var3 + ((int32_t)dig_P7 << 7)) >> 4);
-  
-  return P;
+    if(P >= var4)
+        P = (( P / (uint32_t) var1) << 1);
+    else
+        P = ((P << 1) / (uint32_t) var1);
+        
+    var1 = ((int32_t) dig_P9 * (int32_t) (((P >> 3) * (P >> 3)) >> 13)) >> 12;
+    var2 = ((int32_t)(P >> 2) * (int32_t) dig_P8) >> 13;
+    var3 = ((int32_t)(P >> 8) * (int32_t)(P >> 8) * (int32_t)(P >> 8) * (int32_t)dig_P10) >> 17;
+    P = (int32_t)(P) + ((var1 + var2 + var3 + ((int32_t)dig_P7 << 7)) >> 4);
+    
+    return P;
 }
 
 int sensor_read_pressure(sensor_data_t *data)
-{
+{   
     uint8_t buf[3];
 
     if (i2c_write(0x75, 0x00) != 0)
@@ -199,6 +199,9 @@ int sensor_read_pressure(sensor_data_t *data)
 
     if (i2c_write(0x74, 0x25) != 0)
         return -1;
+
+    osDelay(50);
+    
 
     if (i2c_read_reg(BME680_ADDR, 0x1F, buf, 3) != 0)
         return -1;
