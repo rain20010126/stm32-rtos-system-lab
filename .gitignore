@@ -1,12 +1,20 @@
-# Build output
+# ===== Build output =====
 Debug/
+Release/
 build/
 
-# Object / analysis files
+# ===== Object / analysis =====
 *.o
+*.d
 *.su
 *.cyclo
 
-# Binary
+# ===== Binary =====
 *.elf
 *.map
+*.bin
+*.hex
+
+# ===== STM32CubeIDE =====
+.settings/
+
