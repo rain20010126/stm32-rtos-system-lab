@@ -55,10 +55,23 @@ const osThreadAttr_t RxTask_attributes = {
 };
 
 
+osThreadId_t I2CTaskHandle;
+const osThreadAttr_t I2CTask_attributes = {
+  .name = "I2CTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityHigh,
+};
+
 /* Definitions for logQueue */
 osMessageQueueId_t logQueueHandle;
 const osMessageQueueAttr_t logQueue_attributes = {
   .name = "logQueue"
+};
+
+
+osMessageQueueId_t i2cQueueHandle;
+const osMessageQueueAttr_t i2cQueue_attributes = {
+  .name = "i2cQueue"
 };
 /* USER CODE BEGIN PV */
 
@@ -73,12 +86,24 @@ void StartTask02(void *argument);
 void StartTask03(void *argument);
 void BenchmarkTask(void *argument);
 void RxTask(void *argument);
+void I2CTask(void *argument);
 
 typedef enum {
     MODE_TEMP,     // human-readable output
     MODE_BENCH,    // performance measurement
     MODE_SILENT    // no output, pure data flow
 } system_mode_t;
+
+typedef enum {
+    I2C_REQ_READ_TEMP,
+    I2C_REQ_READ_PRESSURE,
+} i2c_req_type_t;
+
+typedef struct {
+    i2c_req_type_t type;
+    void *result;
+    osSemaphoreId_t done_sem;
+} i2c_request_t;
 
 volatile system_mode_t current_mode = MODE_SILENT;
 
@@ -100,12 +125,18 @@ int main(void)
   i2c_os_init(); 
 
   logQueueHandle = osMessageQueueNew (10, sizeof(log_data_t), &logQueue_attributes);
+  i2cQueueHandle = osMessageQueueNew(
+      10,                  
+      sizeof(i2c_request_t), 
+      &i2cQueue_attributes
+  );
 
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
   SensorTaskHandle = osThreadNew(StartTask02, NULL, &SensorTask_attributes);
   LoggerTaskHandle = osThreadNew(StartTask03, NULL, &LoggerTask_attributes);
   BenchmarkTaskHandle = osThreadNew(BenchmarkTask, NULL, &BenchmarkTask_attributes);
   RxTaskHandle = osThreadNew(RxTask, NULL, &RxTask_attributes);
+  I2CTaskHandle = osThreadNew(I2CTask, NULL, &I2CTask_attributes);
 
   /* Start scheduler */
   osKernelStart();
@@ -259,48 +290,73 @@ void StartTask02(void *argument)
 
   for(;;)
   {   
-      if (sensor_read_temperature(&data.sensor) == 0)
-      {   
-          // simulate workload
-          // for (volatile int i = 0; i < 50000; i++);
+      // --- Create I2C request ---
+      i2c_request_t req;
 
-          data.timestamp = benchmark_start();
+      // Create a binary semaphore for request completion
+      osSemaphoreId_t sem = osSemaphoreNew(1, 0, NULL);
 
-          if (osMessageQueuePut(logQueueHandle, &data, 0, 0) == osOK)
-          {
-              uint32_t depth = osMessageQueueGetCount(logQueueHandle);
-              benchmark_queue_update(depth);
+      req.type = I2C_REQ_READ_TEMP;     // Request type: read temperature
+      req.result = &data.sensor;        // Buffer to store sensor data
+      req.done_sem = sem;               // Semaphore to notify completion
 
-              // // --- PI control ---
-              // int error = (int)depth - TARGET_DEPTH;
-
-              // // integral accumulation
-              // integral += error;
-
-              // // anti-windup
-              // if (integral > 100) integral = 100;
-              // if (integral < -100) integral = -100;
-
-              // int delay = BASE_DELAY + KP * error + KI * integral;
-
-              // // clamp delay
-              // if (delay < MIN_DELAY) delay = MIN_DELAY;
-              // if (delay > MAX_DELAY) delay = MAX_DELAY;
-
-
-              // osDelay(delay);
-              osDelay(1);
-          }
-          else
-          {
-              benchmark_queue_drop();
-
-              // queue full -> reduce the producer rate
-              osDelay(MAX_DELAY);
-          }
+      // --- Send request to I2C Task ---
+      if (osMessageQueuePut(i2cQueueHandle, &req, 0, 0) != osOK)
+      {
+          // Queue is full, retry later
+          osDelay(1);
+          osSemaphoreDelete(sem); // Clean up semaphore to avoid leak
+          continue;
       }
-    
-      // osDelay(10);
+
+      // --- Wait for I2C operation to complete ---
+      if (osSemaphoreAcquire(sem, osWaitForever) != osOK)
+      {
+          osSemaphoreDelete(sem);
+          continue;
+      }
+
+      // At this point, data.sensor has been filled by I2C Task
+
+      data.timestamp = benchmark_start();
+
+      // --- Send data to LoggerTask ---
+      if (osMessageQueuePut(logQueueHandle, &data, 0, 0) == osOK)
+      {
+          uint32_t depth = osMessageQueueGetCount(logQueueHandle);
+          benchmark_queue_update(depth);
+
+          // // --- PI control ---
+          // int error = (int)depth - TARGET_DEPTH;
+
+          // // integral accumulation
+          // integral += error;
+
+          // // anti-windup
+          // if (integral > 100) integral = 100;
+          // if (integral < -100) integral = -100;
+
+          // int delay = BASE_DELAY + KP * error + KI * integral;
+
+          // // clamp delay
+          // if (delay < MIN_DELAY) delay = MIN_DELAY;
+          // if (delay > MAX_DELAY) delay = MAX_DELAY;
+
+
+          // osDelay(delay);
+
+          // Control sampling rate
+          osDelay(1);
+      }
+      else
+      {
+          // Queue is full, record drop and slow down producer
+          benchmark_queue_drop();
+          osDelay(MAX_DELAY);
+      }
+
+      // --- Clean up semaphore to avoid memory leak ---
+      osSemaphoreDelete(sem);
   }
 }
 
@@ -315,7 +371,6 @@ void StartTask03(void *argument)
     {
         continue; 
     }
-
 
     if (current_mode == MODE_BENCH)
     {
@@ -393,7 +448,7 @@ void RxTask(void *argument)
                     current_mode = MODE_SILENT;
                     printf("Switch to SILENT mode\r\n");
                 }
-                
+
                 else
                 {
                     printf("Unknown command: %s\r\n", cmd_buf);
@@ -413,6 +468,24 @@ void RxTask(void *argument)
         }
 
         osDelay(50);
+    }
+}
+
+void I2CTask(void *argument)
+{
+    i2c_request_t req;
+
+    for (;;)
+    {
+        if (osMessageQueueGet(i2cQueueHandle, &req, NULL, osWaitForever) == osOK)
+        {
+            if (req.type == I2C_REQ_READ_TEMP)
+            {
+                sensor_read_temperature(req.result);
+            }
+
+            osSemaphoreRelease(req.done_sem);
+        }
     }
 }
 /**
