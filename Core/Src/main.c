@@ -10,6 +10,7 @@
 #include "benchmark_cpu.h"
 #include "benchmark_sys.h"
 #include "control.h"
+#include "string.h"
 
 #define BENCHMARK_MODE 1   // 1: benchmark, 0: production
 
@@ -47,6 +48,15 @@ const osThreadAttr_t BenchmarkTask_attributes = {
   .priority = (osPriority_t) osPriorityLow,
 };
 
+/* Definitions for RxTask */
+osThreadId_t RxTaskHandle;
+const osThreadAttr_t RxTask_attributes = {
+  .name = "RxTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+
+
 /* Definitions for logQueue */
 osMessageQueueId_t logQueueHandle;
 const osMessageQueueAttr_t logQueue_attributes = {
@@ -64,6 +74,14 @@ void StartDefaultTask(void *argument);
 void StartTask02(void *argument);
 void StartTask03(void *argument);
 void BenchmarkTask(void *argument);
+void RxTask(void *argument);
+
+typedef enum {
+    MODE_TEMP,
+    MODE_BENCH
+} system_mode_t;
+
+volatile system_mode_t current_mode = MODE_TEMP;
 
 int main(void)
 {
@@ -88,13 +106,14 @@ int main(void)
   SensorTaskHandle = osThreadNew(StartTask02, NULL, &SensorTask_attributes);
   LoggerTaskHandle = osThreadNew(StartTask03, NULL, &LoggerTask_attributes);
   BenchmarkTaskHandle = osThreadNew(BenchmarkTask, NULL, &BenchmarkTask_attributes);
+  RxTaskHandle = osThreadNew(RxTask, NULL, &RxTask_attributes);
 
   /* Start scheduler */
   osKernelStart();
 
   while (1)
   {
-
+  
   }
 }
 
@@ -183,7 +202,15 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 
+  /* USART2 GPIO Configuration */
+  GPIO_InitStruct.Pin = GPIO_PIN_2 | GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
@@ -209,12 +236,14 @@ void StartDefaultTask(void *argument)
   vTaskSuspend(SensorTaskHandle);
   vTaskSuspend(LoggerTaskHandle);
   vTaskSuspend(BenchmarkTaskHandle); 
+  vTaskSuspend(RxTaskHandle);
 
   benchmark_calibrate_idle(); 
   
   vTaskResume(SensorTaskHandle);
   vTaskResume(LoggerTaskHandle);
   vTaskResume(BenchmarkTaskHandle);
+  vTaskResume(RxTaskHandle);
 
   vTaskDelete(NULL);
 }
@@ -339,9 +368,9 @@ void StartTask03(void *argument)
 
         int temp = data.sensor.temperature;
 
-        // printf("T: %d.%02d\r\n",
-        //         temp / 100,
-        //         abs(temp % 100));
+        printf("T: %d.%02d\r\n",
+                temp / 100,
+                abs(temp % 100));
     }
   }
 }
@@ -350,13 +379,56 @@ void BenchmarkTask(void *argument)
 {
     for (;;)
     {
-        benchmark_sys_log();
-        benchmark_cpu_log();
+        // benchmark_sys_log();
+        // benchmark_cpu_log();
 
         osDelay(1000); 
     }
 }
 
+void RxTask(void *argument)
+{
+    uint8_t ch;
+    char cmd_buf[32];
+    int idx = 0;
+
+    for (;;)
+    {
+        if (HAL_UART_Receive(&huart2, &ch, 1, 10) == HAL_OK)
+        {
+            if (ch == '\r' || ch == '\n')
+            {
+                printf("\r\n");
+
+                cmd_buf[idx] = '\0';
+
+                if (strcmp(cmd_buf, "temp") == 0)
+                {
+                    current_mode = MODE_TEMP;
+                    printf("Switch to TEMP mode\r\n");
+                }
+                else if (strcmp(cmd_buf, "bench") == 0)
+                {
+                    current_mode = MODE_BENCH;
+                    printf("Switch to BENCH mode\r\n");
+                }
+
+                idx = 0;
+            }
+            else
+            {
+                HAL_UART_Transmit(&huart2, &ch, 1, HAL_MAX_DELAY);
+
+                if (idx < sizeof(cmd_buf) - 1)
+                {
+                    cmd_buf[idx++] = ch;
+                }
+            }
+        }
+
+        osDelay(50);
+    }
+}
 /**
   * @brief  This function is executed in case of error occurrence.
   * @retval None
