@@ -443,6 +443,35 @@ void RxTask(void *argument)
                     printf("Switch to BENCH mode\r\n");
                 }
 
+                else if (strcmp(cmd_buf, "pressure") == 0)
+                {
+                    i2c_request_t req;
+                    osSemaphoreId_t sem = osSemaphoreNew(1, 0, NULL);
+
+                    sensor_data_t data; 
+
+                    req.type = I2C_REQ_READ_PRESSURE;
+                    req.result = &data;
+                    req.done_sem = sem;
+
+                    // send request
+                    if (osMessageQueuePut(i2cQueueHandle, &req, 0, 0) != osOK)
+                    {
+                        printf("I2C queue full\r\n");
+                        osSemaphoreDelete(sem);
+                    }
+                    else
+                    {
+                        // wait for I2C task
+                        osSemaphoreAcquire(sem, osWaitForever);
+
+                        // print result
+                        printf("P = %ld Pa\r\n", data.pressure);
+
+                        osSemaphoreDelete(sem);
+                    }
+                }
+
                 else if (strcmp(cmd_buf, "silent") == 0)
                 {
                     current_mode = MODE_SILENT;
@@ -485,6 +514,11 @@ void I2CTask(void *argument)
             }
 
             osSemaphoreRelease(req.done_sem);
+        }
+
+        else if (req.type == I2C_REQ_READ_PRESSURE)
+        {
+            sensor_read_pressure(req.result);
         }
     }
 }
