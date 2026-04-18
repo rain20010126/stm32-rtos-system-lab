@@ -84,6 +84,8 @@ int main(void)
   LoggerTaskHandle = osThreadNew(StartTask03, NULL, &LoggerTask_attributes);
   BenchmarkTaskHandle = osThreadNew(BenchmarkTask, NULL, &BenchmarkTask_attributes);
 
+  // printf("SYSCLK = %lu\n", HAL_RCC_GetSysClockFreq());
+
   /* Start scheduler */
   osKernelStart();
 
@@ -255,7 +257,7 @@ void StartTask02(void *argument)
 
 
               // osDelay(delay);
-              osDelay(1);
+              osDelay(0);
           }
           else
           {
@@ -347,7 +349,7 @@ void BenchmarkTask(void *argument)
         benchmark_sys_log();
         benchmark_cpu_log();
 
-        osDelay(1000);   // 每秒印一次
+        osDelay(1000);  
     }
 }
 

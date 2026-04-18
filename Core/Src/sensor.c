@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include "i2c_driver.h"
 #include "cmsis_os2.h"
+#include "benchmark_sys.h"
+#include "benchmark_cpu.h"
 
 #define BME680_ADDR (0x76 << 1)
 
@@ -109,24 +111,43 @@ int sensor_init(void)
 // ========================
 
 int sensor_read(sensor_data_t *data)
-{
+{   
+    uint32_t sensor_start = benchmark_start();   // [1] sensor total start
+    
     uint8_t buf[3];
+
+
+    // ------------------------
+    // I2C write #1
+    // ------------------------
+    uint32_t i2c_start = benchmark_start();
 
     // config register (recommended)
     if (i2c_write(0x75, 0x00) != HAL_OK)
         return -1;
 
-    // ctrl_meas:
-    // osrs_t = x1 (001)
-    // mode = forced (01)
-    // => 001 00 01 = 0x25
+    benchmark_i2c_latency_record(benchmark_end(i2c_start));
+
+    // ------------------------
+    // I2C write #2
+    // ------------------------
+    i2c_start = benchmark_start();
+    
     if (i2c_write(0x74, 0x25) != HAL_OK)
         return -1;
 
+    benchmark_i2c_latency_record(benchmark_end(i2c_start));
+
+    // ------------------------
+    // I2C read
+    // ------------------------
+    i2c_start = benchmark_start();
 
     // read temperature registers
     if (i2c_read_reg(BME680_ADDR, 0x22, buf, 3) != 0)
         return -1;
+
+    benchmark_i2c_latency_record(benchmark_end(i2c_start));
 
     int32_t adc_T =
         ((int32_t)buf[0] << 12) |
@@ -146,6 +167,12 @@ int sensor_read(sensor_data_t *data)
     int32_t temp_comp = ((t_fine * 5) + 128) >> 8;
 
     data->temperature = temp_comp;
+
+
+    // ------------------------
+    // sensor total latency
+    // ------------------------
+    benchmark_sensor_latency_record(benchmark_end(sensor_start));
 
     return 0;
 }
