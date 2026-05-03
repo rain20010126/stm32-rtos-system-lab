@@ -77,8 +77,12 @@ int sensor_init(void)
     // printf("sensor_init start\n");
 
     // soft reset
-    if (i2c_write(0xE0, 0xB6) != HAL_OK) {
-        printf("reset failed\n");
+    int ret;
+
+    ret = i2c_write(0xE0, 0xB6);
+    if (ret != 0)
+    {
+        printf("reset failed: %d\r\n", ret);
         return -1;
     }
 
@@ -115,16 +119,19 @@ int sensor_read(sensor_data_t *data)
     uint32_t sensor_start = benchmark_start();   // [1] sensor total start
     
     uint8_t buf[3];
-
+    int ret;
 
     // ------------------------
     // I2C write #1
     // ------------------------
     uint32_t i2c_start = benchmark_start();
 
-    // config register (recommended)
-    if (i2c_write(0x75, 0x00) != HAL_OK)
+    ret = i2c_write(0x75, 0x00);
+    if (ret != 0)
+    {
+        printf("write 0x75 failed: %d\r\n", ret);
         return -1;
+    }
 
     benchmark_i2c_latency_record(benchmark_end(i2c_start));
 
@@ -133,8 +140,12 @@ int sensor_read(sensor_data_t *data)
     // ------------------------
     i2c_start = benchmark_start();
     
-    if (i2c_write(0x74, 0x25) != HAL_OK)
-        return -1;
+    ret = i2c_write(0x74, 0x25);
+    if (ret != 0)
+    {
+        printf("write 0x74 failed: %d\r\n", ret);
+        return -2;
+    }
 
     benchmark_i2c_latency_record(benchmark_end(i2c_start));
 
@@ -144,8 +155,12 @@ int sensor_read(sensor_data_t *data)
     i2c_start = benchmark_start();
 
     // read temperature registers
-    if (i2c_read_reg(BME680_ADDR, 0x22, buf, 3) != 0)
-        return -1;
+    ret = i2c_read_reg(BME680_ADDR, 0x22, buf, 3);
+    if (ret != 0)
+    {
+        printf("read temp failed: %d\r\n", ret);
+        return -3;
+    }
 
     benchmark_i2c_latency_record(benchmark_end(i2c_start));
 

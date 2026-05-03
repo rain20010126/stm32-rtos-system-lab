@@ -2,12 +2,11 @@
 #include "stm32f4xx.h"
 #include <stdio.h>
 
-static void i2c_start(void);
+static int  i2c_start(void);
 static int  i2c_send_address(uint8_t addr);
 static int  i2c_write_byte(uint8_t data);
-static uint8_t i2c_read_byte(int ack);
+static int i2c_read_byte(uint8_t *data, int ack);
 static void i2c_stop(void);
-
 
 void i2c_init(void)
 {
@@ -47,7 +46,11 @@ int i2c_read_reg(uint8_t dev, uint8_t reg, uint8_t *buf, int len)
 {
     if (len <= 0) return -1;
 
-    i2c_start();
+    if (i2c_start() != 0)
+    {
+        i2c_stop();
+        return -4;
+    }
 
     if (i2c_send_address(dev) != 0)
     {
@@ -63,7 +66,11 @@ int i2c_read_reg(uint8_t dev, uint8_t reg, uint8_t *buf, int len)
     }
 
     // repeated start
-    i2c_start();
+    if (i2c_start() != 0)
+    {
+        i2c_stop();
+        return -5;
+    }
 
     if (i2c_send_address(dev | 1) != 0)
     {
@@ -75,10 +82,15 @@ int i2c_read_reg(uint8_t dev, uint8_t reg, uint8_t *buf, int len)
     {
         if (i == len - 1)
         {
-            I2C1->CR1 &= ~I2C_CR1_ACK;  // NACK before last byte
+            I2C1->CR1 &= ~I2C_CR1_ACK;
         }
 
-        buf[i] = i2c_read_byte(i != (len - 1));
+        if (i2c_read_byte(&buf[i], i != (len - 1)) != 0)
+        {
+            i2c_stop();
+            I2C1->CR1 |= I2C_CR1_ACK;
+            return -6;
+        }
     }
 
     i2c_stop();
@@ -91,7 +103,14 @@ int i2c_write_reg(uint8_t dev, uint8_t reg, uint8_t val)
 {
     int ret;
 
-    i2c_start();
+    if (i2c_start() != 0)
+    {
+        printf("START failed: SR1=0x%04lX SR2=0x%04lX CR1=0x%04lX\r\n",
+           I2C1->SR1, I2C1->SR2, I2C1->CR1);
+
+        i2c_stop();
+        return -4;
+    }
 
     // send device address (write mode)
     ret = i2c_send_address(dev);
@@ -123,22 +142,22 @@ int i2c_write_reg(uint8_t dev, uint8_t reg, uint8_t val)
     return 0;
 }
 
-static void i2c_start(void)
-{   
-    // printf("before START: SR1=0x%04lX SR2=0x%04lX\n", I2C1->SR1, I2C1->SR2);
+static int i2c_start(void)
+{
     uint32_t timeout = 100000;
 
     I2C1->CR1 |= I2C_CR1_START;
 
-    // printf("after START: SR1=0x%04lX\n", I2C1->SR1);
-
     while (!(I2C1->SR1 & I2C_SR1_SB))
     {
-        if (--timeout == 0) return;
+        if (--timeout == 0)
+            return -1;
     }
 
     volatile uint32_t temp = I2C1->SR1;
     (void)temp;
+
+    return 0;
 }
 
 
@@ -201,22 +220,23 @@ static int i2c_write_byte(uint8_t data)
 
 // --------------------------------
 
-static uint8_t i2c_read_byte(int ack)
+static int i2c_read_byte(uint8_t *data, int ack)
 {
-    uint8_t data;
+    uint32_t timeout = 100000;
 
     if (ack)
         I2C1->CR1 |= I2C_CR1_ACK;
     else
         I2C1->CR1 &= ~I2C_CR1_ACK;
 
-    // Wait RXNE (Receive buffer not empty)
-    while (!(I2C1->SR1 & I2C_SR1_RXNE));
+    while (!(I2C1->SR1 & I2C_SR1_RXNE))
+    {
+        if (--timeout == 0)
+            return -1;
+    }
 
-    // Read data and clean buffer
-    data = I2C1->DR;
-
-    return data;
+    *data = I2C1->DR;
+    return 0;
 }
 
 // --------------------------------

@@ -5,6 +5,7 @@
 
 #include "sensor.h"
 #include "i2c.h"
+#include "i2c_driver.h"
 #include "benchmark_cpu.h"
 #include "benchmark_sys.h"
 #include "control.h"
@@ -18,7 +19,7 @@ osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
   .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityHigh,
 };
 
 /* Definitions for SensorTask */
@@ -34,7 +35,7 @@ osThreadId_t LoggerTaskHandle;
 const osThreadAttr_t LoggerTask_attributes = {
   .name = "LoggerTask",
   .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityBelowNormal,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 
 /* Definitions for BenchmarkTask */
@@ -42,7 +43,7 @@ osThreadId_t BenchmarkTaskHandle;
 const osThreadAttr_t BenchmarkTask_attributes = {
   .name = "BenchmarkTask",
   .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 
 /* Definitions for logQueue */
@@ -50,6 +51,9 @@ osMessageQueueId_t logQueueHandle;
 const osMessageQueueAttr_t logQueue_attributes = {
   .name = "logQueue"
 };
+
+osEventFlagsId_t startEventHandle;
+#define START_EVENT_FLAG 0x01
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -69,13 +73,15 @@ int main(void)
   SystemClock_Config();
 
   MX_GPIO_Init();
-  MX_I2C1_Init();
+  // MX_I2C1_Init();
+  i2c_init();
   MX_USART2_UART_Init();
 
   benchmark_cpu_init();
   benchmark_sys_init();
 
   osKernelInitialize();
+  startEventHandle = osEventFlagsNew(NULL);
 
   logQueueHandle = osMessageQueueNew (10, sizeof(log_data_t), &logQueue_attributes);
 
@@ -203,73 +209,49 @@ void StartDefaultTask(void *argument)
 { 
   osDelay(2000);
 
-  vTaskSuspend(SensorTaskHandle);
-  vTaskSuspend(LoggerTaskHandle);
-  vTaskSuspend(BenchmarkTaskHandle); 
+  benchmark_calibrate_idle();
 
-  benchmark_calibrate_idle(); 
-  
-  vTaskResume(SensorTaskHandle);
-  vTaskResume(LoggerTaskHandle);
-  vTaskResume(BenchmarkTaskHandle);
+  osEventFlagsSet(startEventHandle, START_EVENT_FLAG);
 
   vTaskDelete(NULL);
 }
 
 void StartTask02(void *argument)
 {
-  log_data_t data;
+    log_data_t data;
 
-  sensor_init();
+    osEventFlagsWait(startEventHandle, START_EVENT_FLAG, osFlagsWaitAny, osWaitForever);
 
-  // --- PI controller state ---
-  // static int integral = 0;
+    if (sensor_init() != 0)
+    {
+        printf("sensor init failed\r\n");
+        vTaskDelete(NULL);
+    }
 
-  for(;;)
-  {   
-      if (sensor_read(&data.sensor) == 0)
-      {   
-          // simulate workload
-          // for (volatile int i = 0; i < 50000; i++);
+    for (;;)
+    {
+        if (sensor_read(&data.sensor) == 0)
+        {
+            data.timestamp = benchmark_start();
 
-          data.timestamp = benchmark_start();
+            if (osMessageQueuePut(logQueueHandle, &data, 0, 0) == osOK)
+            {
+                uint32_t depth = osMessageQueueGetCount(logQueueHandle);
+                benchmark_queue_update(depth);
+            }
+            else
+            {
+                benchmark_queue_drop();
+            }
 
-          if (osMessageQueuePut(logQueueHandle, &data, 0, 0) == osOK)
-          {
-              uint32_t depth = osMessageQueueGetCount(logQueueHandle);
-              benchmark_queue_update(depth);
-
-              // // --- PI control ---
-              // int error = (int)depth - TARGET_DEPTH;
-
-              // // integral accumulation
-              // integral += error;
-
-              // // anti-windup
-              // if (integral > 100) integral = 100;
-              // if (integral < -100) integral = -100;
-
-              // int delay = BASE_DELAY + KP * error + KI * integral;
-
-              // // clamp delay
-              // if (delay < MIN_DELAY) delay = MIN_DELAY;
-              // if (delay > MAX_DELAY) delay = MAX_DELAY;
-
-
-              // osDelay(delay);
-              osDelay(0);
-          }
-          else
-          {
-              benchmark_queue_drop();
-
-              // queue full -> reduce the producer rate
-              osDelay(MAX_DELAY);
-          }
-      }
-    
-      // osDelay(10);
-  }
+            osDelay(1);
+        }
+        else
+        {
+            printf("sensor_read failed\r\n");
+            osDelay(10);
+        }
+    }
 }
 
 void StartTask03(void *argument)
