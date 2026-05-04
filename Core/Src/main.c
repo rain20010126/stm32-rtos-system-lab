@@ -81,12 +81,12 @@ const osMessageQueueAttr_t i2cQueue_attributes = {
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
-void StartDefaultTask(void *argument);
-void StartTask02(void *argument);
-void StartTask03(void *argument);
-void BenchmarkTask(void *argument);
-void RxTask(void *argument);
-void I2CTask(void *argument);
+void IdleCalibrationTask(void *argument);
+void SensorProducerTask(void *argument);
+void LoggerConsumerTask(void *argument);
+void BenchmarkMonitorTask(void *argument);
+void UartCommandTask(void *argument);
+void I2CManagerTask(void *argument);
 
 typedef enum {
     MODE_TEMP,     // human-readable output
@@ -113,7 +113,6 @@ int main(void)
   SystemClock_Config();
 
   MX_GPIO_Init();
-  // MX_I2C1_Init();
   i2c_init_polling();
   MX_USART2_UART_Init();
 
@@ -131,12 +130,12 @@ int main(void)
       &i2cQueue_attributes
   );
 
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
-  SensorTaskHandle = osThreadNew(StartTask02, NULL, &SensorTask_attributes);
-  LoggerTaskHandle = osThreadNew(StartTask03, NULL, &LoggerTask_attributes);
-  BenchmarkTaskHandle = osThreadNew(BenchmarkTask, NULL, &BenchmarkTask_attributes);
-  RxTaskHandle = osThreadNew(RxTask, NULL, &RxTask_attributes);
-  I2CTaskHandle = osThreadNew(I2CTask, NULL, &I2CTask_attributes);
+  defaultTaskHandle = osThreadNew(IdleCalibrationTask, NULL, &defaultTask_attributes);
+  SensorTaskHandle = osThreadNew(SensorProducerTask, NULL, &SensorTask_attributes);
+  LoggerTaskHandle = osThreadNew(LoggerConsumerTask, NULL, &LoggerTask_attributes);
+  BenchmarkTaskHandle = osThreadNew(BenchmarkMonitorTask, NULL, &BenchmarkTask_attributes);
+  RxTaskHandle = osThreadNew(UartCommandTask, NULL, &RxTask_attributes);
+  I2CTaskHandle = osThreadNew(I2CManagerTask, NULL, &I2CTask_attributes);
 
   /* Start scheduler */
   osKernelStart();
@@ -259,7 +258,7 @@ int _write(int file, char *ptr, int len)
   * @retval None
   */
 /* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
+void IdleCalibrationTask(void *argument)
 { 
   osDelay(2000);
 
@@ -278,7 +277,7 @@ void StartDefaultTask(void *argument)
   vTaskDelete(NULL);
 }
 
-void StartTask02(void *argument)
+void SensorProducerTask(void *argument)
 {
   log_data_t data;
 
@@ -360,7 +359,7 @@ void StartTask02(void *argument)
   }
 }
 
-void StartTask03(void *argument)
+void LoggerConsumerTask(void *argument)
 {
   log_data_t data = {0}; 
   static int counter = 0;
@@ -402,7 +401,7 @@ void StartTask03(void *argument)
   }
 }
 
-void BenchmarkTask(void *argument)
+void BenchmarkMonitorTask(void *argument)
 {
     for (;;)
     {
@@ -416,7 +415,7 @@ void BenchmarkTask(void *argument)
     }
 }
 
-void RxTask(void *argument)
+void UartCommandTask(void *argument)
 {
     uint8_t ch;
     char cmd_buf[32];
@@ -500,7 +499,7 @@ void RxTask(void *argument)
     }
 }
 
-void I2CTask(void *argument)
+void I2CManagerTask(void *argument)
 {
     i2c_request_t req;
 
