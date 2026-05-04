@@ -124,22 +124,40 @@ int sensor_init(void)
 int sensor_read_temperature(sensor_data_t *data)
 {
     uint8_t buf[3];
+    int ret;
 
-    // config register (recommended)
-    // printf("1\n");
-    if (i2c_write(0x75, 0x00) != 0)
+    // ------------------------
+    // I2C write #1
+    // ------------------------
+    ret = i2c_write(0x75, 0x00);
+    if (ret != 0)
+    {
+        printf("write 0x75 failed: %d\r\n", ret);
         return -1;
-    // printf("2\n");
-    // ctrl_meas:
-    // osrs_t = x1 (001)
-    // mode = forced (01)
-    // => 001 00 01 = 0x25
-    if (i2c_write(0x74, 0x25) != 0)
-        return -1;
+    }
+
+    // ------------------------
+    // I2C write #2
+    // ------------------------
+    
+    ret = i2c_write(0x74, 0x25);
+    if (ret != 0)
+    {
+        printf("write 0x74 failed: %d\r\n", ret);
+        return -2;
+    }
+
+    // ------------------------
+    // I2C read
+    // ------------------------
 
     // read temperature registers
-    if (i2c_read_reg(BME680_ADDR, 0x22, buf, 3) != 0)
-        return -1;
+    ret = i2c_read_reg(BME680_ADDR, 0x22, buf, 3);
+    if (ret != 0)
+    {
+        printf("read temp failed: %d\r\n", ret);
+        return -3;
+    }
 
     int32_t adc_T =
         ((int32_t)buf[0] << 12) |
