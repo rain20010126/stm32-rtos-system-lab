@@ -10,18 +10,31 @@ It investigates how different synchronization mechanisms and system designs affe
 The main goals of this project are:
 
 - Compare busy-wait (polling) and event-driven (state machine + semaphore) designs  
-- Analyze producer-consumer rate mismatch in RTOS systems  
+- Analyze queue behavior and producer-consumer balance in RTOS systems 
 - Build a benchmarking framework to measure throughput, latency, and CPU usage  
-- Apply control methods (PI controller) to stabilize system behavior  
 - Extend the system toward Linux device driver development  
 
 ---
 
 ## System Architecture (RTOS)
-SensorTask (Producer) 
-→ Message Queue 
-→ LoggerTask (Consumer)
 
+```text
+UART Command Interface
+        |
+        v
+Runtime Mode Control
+        |
+        v
+SensorTask (Producer)
+        |
+        v
+Message Queue
+        |
+        v
+LoggerTask (Consumer)
+
+BenchmarkTask monitors throughput, sensor read latency, queue depth, drop count, and CPU usage.
+```
 
 ---
 
@@ -38,9 +51,8 @@ SensorTask (Producer)
 ### LoggerTask (Consumer)
 
 - Retrieves data from the queue  
-- Measures throughput (msg/sec)  
-- Measures end-to-end latency (enqueue → processing completion)  
-- Simulates processing workload  
+- Updates throughput statistics  
+- Supports optional synthetic workload for stress testing
 
 ---
 
@@ -50,22 +62,53 @@ SensorTask (Producer)
   - Throughput  
   - Queue depth  
   - Drop rate  
-  - Latency  
+  - Sensor read latency  
   - CPU usage (idle-based estimation)  
 
 ---
+
+### UART Command Interface
+
+The system provides a UART-based command interface to switch runtime modes without recompiling the firmware.
+
+Supported commands include:
+
+| Command | Description |
+|---|---|
+| `temp` | Print temperature data periodically |
+| `pressure` | Print pressure data periodically |
+| `bench` | Enable benchmark-oriented logging |
+| `silent` | Consume queue data without printing every message |
+
+### I2C Manager Task
+
+The project also explores a centralized I2C Manager Task design for multi-task I2C access.
+
+Instead of allowing multiple tasks to access the I2C bus directly, tasks can send I2C requests to the manager through a queue. Each request may include a completion semaphore, allowing the caller to block until the transaction is completed.
+
+This design helps serialize I2C access, reduce bus-level race conditions, and make the driver architecture easier to extend.
 
 ## Benchmark Metrics
 
 The system measures:
 
 - **Throughput** — messages processed per second  
-- **Latency** — time from enqueue to processing completion  
+- **Sensor read latency** — wall time of `sensor_read()`, measured using the DWT cycle counter 
 - **Queue depth** — to observe backlog  
 - **Drop rate** — queue overflow occurrences  
 - **CPU usage** — estimated based on idle time  
 
 ---
+
+## Experiment Branches
+
+The driver comparison experiments are maintained in separate branches:
+
+- Polling implementation: [`exp/i2c-polling`](https://github.com/rain20010126/stm32-rtos-system-lab/tree/exp/i2c-polling)
+- FSM + Semaphore implementation: [`exp/i2c-state-machine-semaphore`](https://github.com/rain20010126/stm32-rtos-system-lab/tree/exp/i2c-state-machine-semaphore)
+
+These branches are used to compare two I2C driver implementations under the same RTOS benchmark setup.
+Detailed experiment logs and analysis are documented in the HackMD note.
 
 ## Experiment Design
 
@@ -94,90 +137,70 @@ This project compares two synchronization and I/O strategies:
 
 **Characteristics:**
 
-- Non-blocking  
-- More flexible scheduling  
-- Higher implementation complexity  
+- Avoids busy-waiting in the calling task
+- Uses semaphore-based blocking wait for I/O completion
+- Allows CPU to execute other tasks or enter idle during I/O waiting
+- More flexible scheduling
+- Higher implementation complexity
 
 ---
 
 ## Experimental Observations
 
-### Busy Wait
+The experimental results show that the observed performance depends heavily on the producer rate.
 
-- CPU usage: high (near saturation)  
-- Throughput: stable but limited by CPU  
-- Latency: relatively high  
-- Queue tends to accumulate backlog  
+### Low producer rate
 
----
+When the SensorTask delay is relatively long, the throughput is mainly limited by the task delay rather than the I2C driver implementation. Under this condition, polling and FSM + Semaphore show similar throughput and CPU usage.
 
-### State Machine + Semaphore
+### High producer rate
 
-- CPU usage: similar to busy wait  
-- Throughput: similar to busy wait  
-- Latency: no significant improvement observed  
+When the SensorTask delay is very short, the SensorTask issues I2C transactions almost back-to-back.
 
----
+In this condition:
+
+- Polling can achieve higher raw throughput
+- Polling consumes nearly all CPU time due to busy-waiting
+- FSM + Semaphore avoids continuous busy-waiting by blocking the task while the I2C transaction is handled by interrupts
+- FSM + Semaphore is more suitable for RTOS multi-task systems where CPU availability and task responsiveness are important
+
+## Note on Previous Experimental Results
+
+Earlier experiment results were treated as development-stage observations because the experimental conditions were not fully controlled across branches.
+
+For the final comparison, the polling and FSM + Semaphore branches were re-tested with aligned benchmark conditions, including queue configuration, workload setting, SensorTask delay settings, and latency measurement method.
+
+Therefore, the README summarizes the controlled comparison, while detailed logs and historical observations are documented in the HackMD note.
 
 ## Key Insights
 
-### 1. Event-driven design does not always reduce CPU usage
+### 1. FSM + Semaphore is not mainly for higher raw throughput
 
-In this system:
+The FSM + Semaphore implementation does not always produce higher raw throughput than polling.
 
-- I2C latency: on the order of tens of microseconds  
-- RTOS scheduling granularity: approximately 1 ms  
+Polling can be faster in a single-task benchmark because it continuously checks I2C status flags and immediately continues once the hardware is ready. However, this also keeps the CPU busy during the waiting period.
 
-Therefore:
-
-> I/O completes much faster than task scheduling resolution
-
-This results in minimal actual blocking, and the expected advantage of semaphore-based design is not fully realized.
+FSM + Semaphore trades some raw throughput for better RTOS behavior. The task can block while waiting for I2C completion, allowing the CPU to execute other tasks or enter idle.
 
 ---
 
-### 2. The real bottleneck is rate mismatch
+### 2. Queue behavior verifies producer-consumer balance
 
-When:
+Queue depth and drop count are used to verify whether the consumer can keep up with the producer.
 
-- Producer rate exceeds consumer processing capability  
+In the controlled driver comparison, no message drops were observed, and the maximum queue depth remained low. This indicates that the benchmark mainly reflects I2C driver behavior and CPU usage rather than queue overload.
 
-The system exhibits:
-
-- Queue backlog  
-- Increased latency  
-- Rising drop rate  
-
-Thus, system performance is primarily limited by:
-
-> The mismatch between producer and consumer rates  
+If the producer rate exceeds the consumer processing capability in a heavier workload, the system may show queue backlog, increased latency, or message drops.
 
 ---
 
-### 3. PI Controller stabilizes the system
-
-To address queue buildup, a PI controller is introduced:
-
-- Input: queue depth  
-- Output: producer sampling delay  
-
-By dynamically adjusting the data generation rate:
-
-- Queue depth is stabilized  
-- Drop rate is reduced  
-- Latency is controlled  
-
-This converts the system from passive load handling to active control.
-
----
-
-### 4. System performance depends on overall design
+### 3. System performance depends on overall design
 
 This project demonstrates:
 
-- Event-driven design is not always superior to busy wait  
-- Synchronization effectiveness depends on workload and I/O latency  
-- RTOS performance must be analyzed at the system level  
+- Event-driven design is not always superior in raw throughput
+- Driver design should be evaluated together with CPU availability and task responsiveness
+- RTOS performance must be analyzed at the system level
 
 ---
 
@@ -224,7 +247,5 @@ This project demonstrates:
 
 - RTOS-based producer-consumer system design  
 - Comparison of busy wait and event-driven approaches  
-- System bottleneck identification and analysis  
-- Modeling and solving rate mismatch problems  
-- Applying control theory (PI controller) to system optimization  
+- System bottleneck identification and analysis   
 - Extending from embedded RTOS to Linux driver development  
