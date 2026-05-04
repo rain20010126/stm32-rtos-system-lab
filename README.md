@@ -9,32 +9,21 @@ It investigates how different synchronization mechanisms and system designs affe
 
 The main goals of this project are:
 
-- Compare busy-wait (polling) and event-driven (state machine + semaphore) designs  
-- Analyze queue behavior and producer-consumer balance in RTOS systems 
-- Build a benchmarking framework to measure throughput, latency, and CPU usage  
-- Extend the system toward Linux device driver development  
+- Compare busy-wait (polling) and event-driven (state machine + semaphore) I2C driver designs
+- Design a centralized I2C Manager Task to serialize bus access and prevent multi-task race conditions
+- Analyze queue behavior and producer-consumer balance in RTOS systems
+- Build a benchmarking framework to measure throughput, sensor read latency, and CPU usage
+- Extend the system toward Linux device driver development
 
 ---
 
 ## System Architecture (RTOS)
 
-```text
-UART Command Interface
-        |
-        v
-Runtime Mode Control
-        |
-        v
-SensorTask (Producer)
-        |
-        v
-Message Queue
-        |
-        v
-LoggerTask (Consumer)
+> Architecture diagram will be added later.
 
-BenchmarkTask monitors throughput, sensor read latency, queue depth, drop count, and CPU usage.
-```
+The benchmark uses a producer-consumer model. `SensorTask` reads BME680 data through I2C and pushes sensor samples into a message queue. `LoggerTask` consumes queued data and updates throughput statistics. `BenchmarkTask` periodically reports throughput, sensor read latency, queue depth, drop count, and CPU usage.
+
+Runtime behavior can be controlled through the UART command interface. The project also introduces an I2C Manager Task design to centralize I2C bus access. Instead of allowing multiple tasks to access the I2C driver directly, I2C requests are serialized through a manager task, reducing race conditions and making the bus access pattern easier to reason about in an RTOS multi-task environment.
 
 ---
 
@@ -42,7 +31,7 @@ BenchmarkTask monitors throughput, sensor read latency, queue depth, drop count,
 
 ### SensorTask (Producer)
 
-- Reads sensor data via I2C (BME680)  
+- Reads BME680 data through the I2C driver
 - Attaches timestamp and pushes data into the queue  
 - Controls data generation rate (via `osDelay` or dynamic adjustment)  
 
@@ -82,11 +71,18 @@ Supported commands include:
 
 ### I2C Manager Task
 
-The project also explores a centralized I2C Manager Task design for multi-task I2C access.
+The project explores a centralized I2C Manager Task design to prevent race conditions when multiple tasks need to access the same I2C bus.
 
-Instead of allowing multiple tasks to access the I2C bus directly, tasks can send I2C requests to the manager through a queue. Each request may include a completion semaphore, allowing the caller to block until the transaction is completed.
+Instead of allowing application tasks to call the I2C driver directly, tasks send I2C requests to the manager through a request queue. The manager processes one request at a time, ensuring that I2C transactions are serialized.
 
-This design helps serialize I2C access, reduce bus-level race conditions, and make the driver architecture easier to extend.
+Each request may include a completion semaphore, allowing the caller to block until its transaction is completed without busy-waiting.
+
+This design provides:
+
+- Centralized I2C bus ownership
+- Serialized access to avoid bus-level race conditions
+- Clear request/response synchronization using per-request semaphores
+- Better scalability when more sensor or application tasks are added
 
 ## Benchmark Metrics
 
@@ -184,7 +180,17 @@ FSM + Semaphore trades some raw throughput for better RTOS behavior. The task ca
 
 ---
 
-### 2. Queue behavior verifies producer-consumer balance
+### 2. I2C Manager Task prevents bus-level race conditions
+
+In an RTOS system, multiple tasks may need to access the same I2C bus. If each task calls the I2C driver directly, transactions may overlap or interfere with each other.
+
+The I2C Manager Task centralizes bus ownership by receiving I2C requests through a queue and processing them one at a time. This serializes I2C access and reduces race conditions at the bus and driver level.
+
+Using a per-request semaphore also allows the caller to wait for completion without busy-waiting.
+
+---
+
+### 3. Queue behavior verifies producer-consumer balance
 
 Queue depth and drop count are used to verify whether the consumer can keep up with the producer.
 
@@ -194,7 +200,7 @@ If the producer rate exceeds the consumer processing capability in a heavier wor
 
 ---
 
-### 3. System performance depends on overall design
+### 4. System performance depends on overall design
 
 This project demonstrates:
 
@@ -245,7 +251,9 @@ User Space
 
 This project demonstrates:
 
-- RTOS-based producer-consumer system design  
-- Comparison of busy wait and event-driven approaches  
-- System bottleneck identification and analysis   
-- Extending from embedded RTOS to Linux driver development  
+- RTOS-based producer-consumer system design
+- Centralized I2C Manager Task design for bus serialization and race-condition prevention
+- Comparison of polling and interrupt-driven FSM + Semaphore I2C driver approaches
+- Benchmarking of throughput, sensor read latency, queue behavior, drop count, and CPU usage
+- System-level analysis of driver design, CPU availability, and task responsiveness
+- Extending from embedded RTOS toward Linux driver development
